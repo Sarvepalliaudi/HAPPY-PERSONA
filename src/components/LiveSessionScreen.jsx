@@ -1,16 +1,15 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Mic, MicOff, LogOut, AlertCircle, RefreshCw } from 'lucide-react';
+import { Mic, MicOff, LogOut, MessageSquare, Waves, Volume2 } from 'lucide-react';
 import ThreeDNAvatar from './ThreeDNAvatar';
 
 const LiveSessionScreen = ({ sessionData, onEnd, onIntentChange }) => {
   const [isListening, setIsListening] = useState(false);
   const [transcript, setTranscript] = useState("");
-  const [aiResponse, setAiResponse] = useState("Biometric connection established. I am your Persona. Use your voice to guide me.");
+  const [aiResponse, setAiResponse] = useState("Scan complete. I have successfully synthesized your Happy Persona. How can I assist your well-being today?");
   const [isProcessing, setIsProcessing] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [rmsVolume, setRmsVolume] = useState(0);
-  const [micActive, setMicActive] = useState(false);
 
   const recognitionRef = useRef(null);
   const synthesisRef = useRef(window.speechSynthesis);
@@ -22,76 +21,66 @@ const LiveSessionScreen = ({ sessionData, onEnd, onIntentChange }) => {
 
   const [errorMsg, setErrorMsg] = useState("");
 
-  const initSpeechRecognition = useCallback(() => {
+  // Initialize Speech Recognition
+  useEffect(() => {
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (SpeechRecognition) {
-      if (recognitionRef.current) recognitionRef.current.stop();
-      
       recognitionRef.current = new SpeechRecognition();
       recognitionRef.current.continuous = true;
       recognitionRef.current.interimResults = true;
       recognitionRef.current.lang = 'en-US';
 
       recognitionRef.current.onresult = (event) => {
-        let interim = '';
-        for (let i = event.resultIndex; i < event.results.length; ++i) {
-          if (event.results[i].isFinal) {
-            const text = event.results[i][0].transcript;
-            setTranscript(text);
-            handleUserMessage(text);
-          } else {
-            interim += event.results[i][0].transcript;
-          }
-        }
-        if (interim) setTranscript(interim);
-      };
-
-      recognitionRef.current.onstart = () => {
-        setIsListening(true);
-        setErrorMsg("");
-      };
-
-      recognitionRef.current.onend = () => {
-        if (micActive) {
-            try { recognitionRef.current.start(); } catch(e) {}
-        } else {
-            setIsListening(false);
+        const current = event.results[event.resultIndex];
+        const text = current[0].transcript;
+        setTranscript(text);
+        setErrorMsg(""); 
+        
+        if (current.isFinal) {
+          handleUserMessage(text);
         }
       };
 
       recognitionRef.current.onerror = (err) => {
-        console.error('Recognition Error:', err);
+        console.error('Speech Recognition Error:', err);
+        setIsListening(false);
         if (err.error === 'not-allowed') {
-          setErrorMsg("Mic permission blocked. Check browser settings.");
-          setMicActive(false);
-          setIsListening(false);
+          setErrorMsg("Microphone access denied. Please check site permissions.");
+        } else if (err.error === 'network') {
+          setErrorMsg("Network error. Checking connection...");
         } else if (err.error === 'no-speech') {
-            // Silence
+           // Common in continuous mode if quiet
         } else {
-          setErrorMsg("Unstable neural link. Retrying...");
+          setErrorMsg("Microphone link failed. Tap to retry.");
         }
       };
     } else {
-      setErrorMsg("Neural Vocal Analysis not supported in this browser.");
+      setErrorMsg("Web Speech API not supported in this browser.");
     }
-  }, [micActive]);
 
-  useEffect(() => {
-    initSpeechRecognition();
     return () => {
       if (recognitionRef.current) recognitionRef.current.stop();
       if (synthesisRef.current) synthesisRef.current.cancel();
       if (animationFrameRef.current) cancelAnimationFrame(animationFrameRef.current);
-      if (audioStreamRef.current) audioStreamRef.current.getTracks().forEach(t => t.stop());
+      if (audioStreamRef.current) {
+        audioStreamRef.current.getTracks().forEach(t => t.stop());
+      }
     };
   }, []);
 
+  // Audio Analyzer for User and AI Voice Visualization
   const startAudioAnalysis = useCallback(async () => {
     try {
-      if (audioStreamRef.current) audioStreamRef.current.getTracks().forEach(t => t.stop());
+      if (audioStreamRef.current) {
+        audioStreamRef.current.getTracks().forEach(t => t.stop());
+      }
 
       const stream = await navigator.mediaDevices.getUserMedia({ 
-        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } 
+        audio: {
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true
+        } 
       });
       audioStreamRef.current = stream;
 
@@ -99,7 +88,9 @@ const LiveSessionScreen = ({ sessionData, onEnd, onIntentChange }) => {
         audioContextRef.current = new (window.AudioContext || window.webkitAudioContext)();
       }
       
-      if (audioContextRef.current.state === 'suspended') await audioContextRef.current.resume();
+      if (audioContextRef.current.state === 'suspended') {
+        await audioContextRef.current.resume();
+      }
 
       const source = audioContextRef.current.createMediaStreamSource(stream);
       analyzerRef.current = audioContextRef.current.createAnalyser();
@@ -111,35 +102,54 @@ const LiveSessionScreen = ({ sessionData, onEnd, onIntentChange }) => {
 
       const updateVolume = () => {
         if (!analyzerRef.current) return;
+        
         analyzerRef.current.getByteFrequencyData(dataArrayRef.current);
         let sum = 0;
-        for (let i = 0; i < bufferLength; i++) sum += dataArrayRef.current[i];
-        const average = (sum / bufferLength) / 128;
-        
-        if (isSpeaking) {
-          setRmsVolume(0.5 + Math.random() * 0.5); 
-        } else {
-          setRmsVolume(average);
+        for (let i = 0; i < bufferLength; i++) {
+          sum += dataArrayRef.current[i];
         }
+        const average = (sum / bufferLength) / 128; // 0 to 2 range roughly
+        
+        // Use real audio volume when listening, simulated when AI speaks
+        if (isSpeaking) {
+          // Add some organic variation to AI's simulated volume
+          setRmsVolume(0.4 + Math.random() * 0.6);
+        } else if (isListening) {
+          setRmsVolume(average);
+        } else {
+          setRmsVolume(0);
+        }
+        
         animationFrameRef.current = requestAnimationFrame(updateVolume);
       };
       updateVolume();
     } catch (err) {
-      console.warn("Audio Context init failed:", err);
-      if (err.name === 'NotAllowedError') setErrorMsg("Mic permission required for Live Sync.");
+      console.warn("Audio analysis failed:", err);
+      // Don't show error immediately as user might only want to listen
     }
-  }, [isSpeaking]);
+  }, [isSpeaking, isListening]);
 
   useEffect(() => {
-    if (isListening || isSpeaking) startAudioAnalysis();
+    if (isListening || isSpeaking) {
+      startAudioAnalysis();
+    }
   }, [isListening, isSpeaking, startAudioAnalysis]);
 
   const handleUserMessage = async (text) => {
-    if (!text || text.trim().length < 2) return;
-    setIsProcessing(true);
-    setTranscript("");
+    if (!text || text.trim().length === 0) return;
     
+    setIsProcessing(true);
     try {
+      // 1. Analyze Sentiment/Intent for Background
+      const intentRes = await fetch('/api/analyze-sentiment', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text })
+      });
+      const inviteData = await intentRes.json();
+      if (inviteData.intent) onIntentChange(inviteData.intent);
+
+      // 2. Get AI Response from Gemini
       const chatRes = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -148,14 +158,14 @@ const LiveSessionScreen = ({ sessionData, onEnd, onIntentChange }) => {
           context: { sessionData } 
         })
       });
-      const data = await chatRes.json();
+      const chatData = await chatRes.json();
       
-      if (data.text) {
-        setAiResponse(data.text);
-        speak(data.text);
+      if (chatData.text) {
+        setAiResponse(chatData.text);
+        speak(chatData.text);
       }
     } catch (err) {
-      console.error('Chat API Error:', err);
+      console.error('API Error:', err);
     } finally {
       setIsProcessing(false);
     }
@@ -165,143 +175,207 @@ const LiveSessionScreen = ({ sessionData, onEnd, onIntentChange }) => {
     if (!synthesisRef.current) return;
     synthesisRef.current.cancel();
     
-    const utterance = new SpeechSynthesisUtterance(text);
+    // Ensure we have voices loaded
     const voices = synthesisRef.current.getVoices();
-    const mode = sessionData?.voice || 'neutral';
-
-    if (mode === 'deep') {
-      utterance.voice = voices.find(v => v.name.toLowerCase().includes('male')) || voices[0];
+    const utterance = new SpeechSynthesisUtterance(text);
+    
+    // Voice Selection & Tuning Logic
+    const voiceMode = sessionData?.voice || 'neutral';
+    
+    // Try to find a fitting voice based on mode
+    if (voiceMode === 'deep') {
+      utterance.voice = voices.find(v => v.name.toLowerCase().includes('google') && v.name.toLowerCase().includes('male')) || 
+                      voices.find(v => v.name.toLowerCase().includes('male')) || voices[0];
       utterance.pitch = 0.5;
-      utterance.rate = 0.9;
-    } else if (mode === 'soft') {
-      utterance.voice = voices.find(v => v.name.toLowerCase().includes('female')) || voices[0];
-      utterance.pitch = 1.3;
       utterance.rate = 1.0;
+    } else if (voiceMode === 'soft') {
+      utterance.voice = voices.find(v => v.name.toLowerCase().includes('google') && v.name.toLowerCase().includes('female')) || 
+                      voices.find(v => v.name.toLowerCase().includes('female')) || voices[0];
+      utterance.pitch = 1.4;
+      utterance.rate = 1.1;
     } else {
       utterance.voice = voices[0];
       utterance.pitch = 1.0;
-      utterance.rate = 1.0;
+      utterance.rate = 1.1;
     }
 
     utterance.onstart = () => {
         setIsSpeaking(true);
-        if (audioContextRef.current?.state === 'suspended') audioContextRef.current.resume();
     };
     utterance.onend = () => {
         setIsSpeaking(false);
         setRmsVolume(0);
     };
-    utterance.onerror = () => setIsSpeaking(false);
-    
+    utterance.onerror = (e) => {
+        console.error("Speech Synthesis Error:", e);
+        setIsSpeaking(false);
+        setRmsVolume(0);
+    };
+
     synthesisRef.current.speak(utterance);
   };
 
   const toggleListening = () => {
     if (isListening) {
       if (recognitionRef.current) recognitionRef.current.stop();
-      setMicActive(false);
       setIsListening(false);
+      setTranscript("");
     } else {
-      if (audioContextRef.current?.state === 'suspended') audioContextRef.current.resume();
-      startAudioAnalysis();
       try {
         if (recognitionRef.current) {
             recognitionRef.current.start();
-            setMicActive(true);
             setIsListening(true);
             setErrorMsg("");
+        } else {
+            setErrorMsg("Neural link component missing.");
         }
-      } catch (e) {
-        initSpeechRecognition();
-        recognitionRef.current.start();
-        setMicActive(true);
+      } catch (err) {
+        console.error("Start recognition failed", err);
+        setIsListening(false);
       }
     }
   };
 
   return (
-    <div className="relative w-full h-full flex flex-col items-center justify-between py-10 px-6 overflow-hidden bg-[#050505]">
-      {/* HUD Top-Bar */}
+    <div className="relative w-full h-full flex flex-col items-center justify-between py-12 px-6 overflow-hidden bg-[#0a0a0a]">
+      {/* Cinematic Background Ambient Motion */}
+      <div className="absolute inset-0 pointer-events-none overflow-hidden opacity-30">
+         <motion.div 
+            animate={{ 
+                scale: [1, 1.4, 1],
+                rotate: [0, 45, 0],
+                opacity: [0.1, 0.4, 0.1],
+                filter: ["blur(100px)", "blur(150px)", "blur(100px)"]
+            }}
+            transition={{ duration: 25, repeat: Infinity, ease: "linear" }}
+            className="absolute -top-[20%] -left-[20%] w-[140%] h-[140%] bg-[radial-gradient(circle,rgba(79,70,229,0.15)_0%,transparent_70%)]"
+         />
+         <motion.div 
+            animate={{ 
+                scale: [1.2, 1, 1.2],
+                rotate: [0, -30, 0],
+                opacity: [0.05, 0.2, 0.05]
+            }}
+            transition={{ duration: 20, repeat: Infinity, ease: "linear" }}
+            className="absolute -bottom-[20%] -right-[20%] w-[120%] h-[120%] bg-[radial-gradient(circle,rgba(59,130,246,0.1)_0%,transparent_60%)]"
+         />
+      </div>
+
+      {/* Top Bar */}
       <div className="w-full flex justify-between items-center z-20">
         <div className="flex items-center gap-3">
-            <motion.div 
-                animate={{ opacity: [1, 0.4, 1] }} 
-                transition={{ duration: 2, repeat: Infinity }}
-                className="w-2.5 h-2.5 bg-emerald-500 rounded-full shadow-[0_0_15px_#10b981]" 
-            />
-            <span className="text-[10px] font-mono tracking-[0.3em] uppercase text-emerald-500">Live Neural Stream</span>
+            <div className="relative">
+                <div className="w-3 h-3 bg-emerald-500 rounded-full animate-pulse shadow-[0_0_15px_rgba(16,185,129,0.5)]"></div>
+                {isSpeaking && <div className="absolute inset-0 bg-emerald-400 rounded-full animate-ping opacity-50" />}
+            </div>
+            <span className="text-[10px] font-mono uppercase tracking-[0.3em] text-white/50">Neural Stream Establised</span>
         </div>
         <button 
           onClick={onEnd}
-          className="bg-white/5 border border-white/10 text-white/50 px-4 py-2 rounded-full text-[10px] font-bold uppercase tracking-widest hover:bg-white hover:text-black transition-all"
+          className="group flex items-center gap-2 bg-white/5 border border-white/10 px-4 py-2 rounded-full text-[10px] font-bold uppercase tracking-widest transition-all hover:bg-white hover:text-black"
         >
-          End Session
+          Purge Session <LogOut size={12} className="group-hover:translate-x-1 transition-transform" />
         </button>
       </div>
 
-      {/* Main Avatar Canvas Container */}
-      <div className="relative flex-1 w-full max-h-[60vh] flex flex-col items-center justify-center">
+      {/* AI AVATAR AREA - 3D Content */}
+      <div className="relative flex-1 flex flex-col items-center justify-center w-full max-h-[60vh]">
+         {/* Replacement with 3D Avatar */}
          <ThreeDNAvatar 
             portrait={sessionData?.portrait} 
             isSpeaking={isSpeaking} 
             rmsVolume={rmsVolume}
             isProcessing={isProcessing} 
          />
+         
+         {/* Live Audio Waveform (Cinematic) */}
+         <div className="absolute bottom-4 flex items-center gap-1.5 h-16 pointer-events-none">
+            {[...Array(48)].map((_, i) => (
+                <motion.div
+                    key={i}
+                    className="w-1 bg-white/10 rounded-full"
+                    animate={{ 
+                        height: (isListening || isSpeaking) ? Math.max(2, rmsVolume * 60 * (1 - Math.abs(i - 24) / 24) * (0.8 + Math.random() * 0.4)) : 2,
+                        opacity: (isListening || isSpeaking) ? 0.8 : 0.1,
+                        backgroundColor: isSpeaking ? "rgba(255,255,255,0.4)" : "rgba(255,255,255,0.1)"
+                    }}
+                    transition={{ type: "spring", stiffness: 400, damping: 40 }}
+                />
+            ))}
+         </div>
       </div>
 
-      {/* Bottom Interface HUD */}
+      {/* Bottom Area: AI Dialogue and Interaction */}
       <div className="w-full max-w-2xl flex flex-col items-center gap-10 z-20 pb-4">
-         {/* Dialogue Bubble */}
-         <div className="w-full text-center px-4 min-h-[120px] flex items-center justify-center">
+         {/* AI Dialogue */}
+         <div className="w-full text-center px-4 relative min-h-[100px] flex items-center justify-center">
             <AnimatePresence mode="wait">
                 <motion.div 
                     key={aiResponse}
-                    initial={{ opacity: 0, scale: 0.95 }}
-                    animate={{ opacity: 1, scale: 1 }}
-                    exit={{ opacity: 0, scale: 0.95 }}
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -20 }}
+                    transition={{ duration: 0.5 }}
                     className="space-y-4"
                 >
-                    <p className="text-2xl md:text-4xl font-black tracking-tighter uppercase italic text-white drop-shadow-2xl">
+                    <p className="text-2xl md:text-4xl font-black tracking-tight leading-none drop-shadow-2xl text-white uppercase italic text-balance">
                          {aiResponse}
                     </p>
                     {isSpeaking && (
-                         <div className="text-[10px] font-mono text-emerald-500 uppercase tracking-[0.5em] animate-pulse">Neural Audio Projection...</div>
+                         <div className="text-[10px] font-mono text-emerald-500 uppercase tracking-[0.5em] animate-pulse">Transmitting Voice Data</div>
                     )}
                 </motion.div>
             </AnimatePresence>
          </div>
 
+         {/* Interaction Controls */}
          <div className="w-full flex flex-col items-center gap-8">
-            {/* Status Feedback */}
-            <div className="h-6 flex items-center justify-center">
+            {/* User Feedback (Transcript) */}
+            <div className="h-4 text-center px-6">
                 {errorMsg ? (
-                    <div className="flex items-center gap-2 text-red-500 text-[10px] font-mono uppercase tracking-[0.3em] font-bold">
-                        <AlertCircle size={12} /> {errorMsg}
-                    </div>
+                    <motion.span 
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        className="text-red-400 text-[10px] font-mono uppercase tracking-[0.3em] font-bold"
+                    >
+                        {errorMsg}
+                    </motion.span>
                 ) : (
-                    <div className="text-white/40 text-[10px] font-mono uppercase tracking-[0.3em]">
-                        {isListening ? (transcript || "Biometric Cues Awaited...") : "Establishing Link... Tap to activate"}
-                    </div>
+                    <motion.span 
+                        animate={{ opacity: isListening ? 1 : 0.4 }}
+                        className="text-white text-[10px] font-mono uppercase tracking-[0.3em]"
+                    >
+                        {isListening ? (transcript || "Biometric Cues Awaited...") : "Tap to activate neural link"}
+                    </motion.span>
                 )}
             </div>
 
-            {/* Interaction Button */}
-            <div className="relative">
+            {/* Main Mic Button */}
+            <div className="relative group">
                 <AnimatePresence>
                     {isListening && (
-                        <motion.div 
-                            initial={{ scale: 0.8, opacity: 0 }}
-                            animate={{ scale: 2, opacity: 0 }}
-                            transition={{ repeat: Infinity, duration: 2 }}
-                            className="absolute inset-0 -m-8 rounded-full border-2 border-white/10" 
-                        />
+                        <>
+                            <motion.div 
+                                initial={{ scale: 0.8, opacity: 0 }}
+                                animate={{ scale: 2, opacity: 0 }}
+                                transition={{ repeat: Infinity, duration: 2, ease: "easeOut" }}
+                                className="absolute inset-0 -m-8 rounded-full border-2 border-white/10" 
+                            />
+                            <motion.div 
+                                initial={{ scale: 0.8, opacity: 0 }}
+                                animate={{ scale: 2.5, opacity: 0 }}
+                                transition={{ repeat: Infinity, duration: 2.5, delay: 0.5, ease: "easeOut" }}
+                                className="absolute inset-0 -m-12 rounded-full border border-white/5" 
+                            />
+                        </>
                     )}
                 </AnimatePresence>
+
                 <button 
                     onClick={toggleListening}
-                    className={`relative z-10 w-24 h-24 rounded-full flex items-center justify-center transition-all duration-700 shadow-2xl ${isListening ? 'bg-white text-black scale-110 ring-[20px] ring-white/5' : 'bg-white/5 text-white border border-white/10 hover:border-white/30'}`}
+                    className={`relative z-10 w-24 h-24 rounded-full flex items-center justify-center transition-all duration-700 shadow-2xl ${isListening ? 'bg-white text-black scale-110 rotate-12 ring-[24px] ring-white/5' : 'bg-white/5 text-white backdrop-blur-3xl border border-white/10 hover:border-white/30 hover:scale-110'}`}
                 >
-                    {isListening ? <Mic size={40} /> : <MicOff size={40} className="opacity-30" />}
+                    {isListening ? <Mic size={40} strokeWidth={2} /> : <MicOff size={40} className="opacity-40" />}
                 </button>
             </div>
 
@@ -310,10 +384,13 @@ const LiveSessionScreen = ({ sessionData, onEnd, onIntentChange }) => {
                     <div className={`w-1 h-1 rounded-full ${isListening ? 'bg-emerald-500 animate-pulse' : 'bg-white/10'}`} />
                     <span>Neural Link</span>
                 </div>
-                <div>Voice: {sessionData?.voice || 'Neutral'}</div>
-                <div className="flex items-center gap-1.5">
-                    <RefreshCw size={8} className={isProcessing ? "animate-spin" : ""} />
-                    Stability: {isProcessing ? "Sinking" : "Locked"}
+                <div className="flex items-center gap-2">
+                    <div className="w-1 h-1 bg-white/10 rounded-full" />
+                    <span>Voice: {sessionData?.voice || 'Neutral'}</span>
+                </div>
+                <div className="flex items-center gap-2">
+                    <div className="w-1 h-1 bg-white/10 rounded-full" />
+                    <span>Encrypted</span>
                 </div>
             </div>
          </div>

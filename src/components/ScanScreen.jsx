@@ -22,7 +22,6 @@ const ScanScreen = ({ onComplete, onCancel }) => {
   const [status, setStatus] = useState("Initializing camera..."); // Initializing, Face Not Detected, Face Stable, etc.
   const [isDetected, setIsDetected] = useState(false);
   const [error, setError] = useState(null);
-  const isCompleteRef = useRef(false);
   
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
@@ -71,23 +70,20 @@ const ScanScreen = ({ onComplete, onCancel }) => {
     if (status === "Analyzing..." || status === "Face Stable") {
        scanIntervalRef.current = setInterval(() => {
         setProgress(prev => {
-          if (prev >= 100) return 100;
+          if (prev >= 100) {
+            clearInterval(scanIntervalRef.current);
+            capturePortrait();
+            return 100;
+          }
           return prev + 1;
         });
-      }, 200); 
+      }, 200); // 100 * 200ms = 20 seconds total
     } else {
         clearInterval(scanIntervalRef.current);
     }
 
     return () => clearInterval(scanIntervalRef.current);
-  }, [status]);
-
-  useEffect(() => {
-    if (progress >= 100 && !isCompleteRef.current) {
-        isCompleteRef.current = true;
-        capturePortrait();
-    }
-  }, [progress, capturePortrait]);
+  }, [status, onComplete]);
 
   const capturePortrait = useCallback(() => {
     if (videoRef.current) {

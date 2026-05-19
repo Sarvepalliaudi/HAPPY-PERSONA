@@ -28,32 +28,32 @@ const App = () => {
     exit: { opacity: 0, x: -20 },
   };
 
-  const handleStart = useCallback(() => setScreen('consent'), []);
-  const handleConsent = useCallback(() => setScreen('voice'), []);
-  const handleVoiceSelect = useCallback((voice) => {
+  const handleStart = () => setScreen('consent');
+  const handleConsent = () => setScreen('voice');
+  const handleVoiceSelect = (voice) => {
     setSessionData(prev => ({ ...prev, voice }));
     setScreen('scan');
-  }, []);
-  const handleScanComplete = useCallback((data) => {
+  };
+  const handleScanComplete = (data) => {
     setSessionData(prev => ({ ...prev, ...data }));
     setScreen('loading');
     // Simulate persona generation
     setTimeout(() => {
       setScreen('live');
     }, 4500);
-  }, []);
-  const handleEndSession = useCallback(() => {
+  };
+  const handleEndSession = () => {
     setScreen('end');
     // We delay the data reset to allow the EndScreen to show the "purge" animation
     setTimeout(() => {
       setSessionData({ portrait: null, voice: 'neutral', timestamp: null });
       setScreen('home');
     }, 5000); // 5 seconds duration for EndScreen
-  }, []);
+  };
 
-  const toggleManual = useCallback(() => setShowManual(prev => !prev), []);
-  const showAbout = useCallback(() => setScreen('about'), []);
-  const goHome = useCallback(() => setScreen('home'), []);
+  const toggleManual = () => setShowManual(!showManual);
+  const showAbout = () => setScreen('about');
+  const goHome = () => setScreen('home');
 
   return (
     <div className="relative min-h-screen w-full overflow-hidden bg-black text-white font-sans">
