@@ -1,0 +1,6 @@
+{
+  "name": "HAPPYPERSONA by AS PHENIX",
+  "description": "An emotional AI application that scans your face to create a personalized, session-only Happy Persona.",
+  "requestFramePermissions": ["camera", "microphone"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
