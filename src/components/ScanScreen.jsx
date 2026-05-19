@@ -38,6 +38,10 @@ const ScanScreen = ({ onComplete, onCancel }) => {
   // Camera setup
   useEffect(() => {
     async function setupCamera() {
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        setError("Camera interface is unavailable in this environment (likely due to missing HTTPS, iframe policies, or device limits).");
+        return;
+      }
       try {
         const stream = await navigator.mediaDevices.getUserMedia({ 
             video: { 

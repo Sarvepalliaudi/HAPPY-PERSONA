@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Camera, AlertCircle, CheckCircle2, UserCheck, Eye, Mic } from 'lucide-react';
-import * as faceMesh from '@mediapipe/face_mesh';
 
 const QUOTES = [
   "Your existence already matters.",
@@ -42,7 +41,12 @@ export default function ScanPhase({ onComplete }) {
 
     const setupFaceMesh = async () => {
       try {
-        const mesh = new faceMesh.FaceMesh({
+        const FaceMeshClass = window.FaceMesh;
+        if (!FaceMeshClass) {
+          setError("FaceMesh is not ready yet.");
+          return;
+        }
+        const mesh = new FaceMeshClass({
           locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}`
         });
 
@@ -100,6 +104,11 @@ export default function ScanPhase({ onComplete }) {
         });
 
         meshRef.current = mesh;
+
+        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+          setError("Webcam permissions or interface not available.");
+          return;
+        }
 
         const stream = await navigator.mediaDevices.getUserMedia({ 
           video: { facingMode: 'user', width: 640, height: 480 },

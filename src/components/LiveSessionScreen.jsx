@@ -70,6 +70,10 @@ const LiveSessionScreen = ({ sessionData, onEnd, onIntentChange }) => {
 
   // Audio Analyzer for User and AI Voice Visualization
   const startAudioAnalysis = useCallback(async () => {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      console.warn("Audio recording is not supported on this browser or under this iframe context.");
+      return;
+    }
     try {
       if (audioStreamRef.current) {
         audioStreamRef.current.getTracks().forEach(t => t.stop());

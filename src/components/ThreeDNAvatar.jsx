@@ -2,8 +2,6 @@ import React, { useRef, useEffect, useMemo } from 'react';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import { Points, PointMaterial, Center, Float, Sparkles, Environment } from '@react-three/drei';
 import * as THREE from 'three';
-import { FaceMesh } from '@mediapipe/face_mesh';
-import * as facemesh from '@mediapipe/face_mesh';
 
 const NeuralFace = ({ landmarks, isSpeaking, rmsVolume, isProcessing }) => {
   const pointsRef = useRef();
@@ -113,48 +111,75 @@ export default function ThreeDNAvatar({ portrait, isSpeaking, rmsVolume, isProce
     video.playsInline = true;
     videoRef.current = video;
 
-    navigator.mediaDevices.getUserMedia({ video: true }).then((stream) => {
-      video.srcObject = stream;
-      video.play();
-    });
-
-    const faceMesh = new FaceMesh({
-      locateFile: (file) => {
-        return `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}`;
-      },
-    });
-
-    faceMesh.setOptions({
-      maxNumFaces: 1,
-      refineLandmarks: true,
-      minDetectionConfidence: 0.5,
-      minTrackingConfidence: 0.5,
-    });
-
-    faceMesh.onResults((results) => {
-      if (results.multiFaceLandmarks && results.multiFaceLandmarks.length > 0) {
-        setLandmarks(results.multiFaceLandmarks[0]);
-      } else {
-        setLandmarks(null);
-      }
-    });
-
-    faceMeshRef.current = faceMesh;
-
+    let activeStream = null;
     let requestID;
-    const sendVideoFrame = async () => {
-      if (video.readyState === 4) {
-        await faceMesh.send({ image: video });
-      }
-      requestID = requestAnimationFrame(sendVideoFrame);
-    };
-    sendVideoFrame();
+    let faceMesh = null;
+
+    if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+      navigator.mediaDevices.getUserMedia({ video: true })
+        .then((stream) => {
+          activeStream = stream;
+          video.srcObject = stream;
+          video.play().catch(err => console.warn("Video auto-play failed:", err));
+        })
+        .catch((err) => {
+          console.warn("Webcam access denied or unavailable in this environment:", err);
+        });
+    } else {
+      console.warn("navigator.mediaDevices or getUserMedia not available in this browser environment.");
+    }
+
+    const FaceMeshClass = window.FaceMesh;
+    if (FaceMeshClass) {
+      faceMesh = new FaceMeshClass({
+        locateFile: (file) => {
+          return `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}`;
+        },
+      });
+
+      faceMesh.setOptions({
+        maxNumFaces: 1,
+        refineLandmarks: true,
+        minDetectionConfidence: 0.5,
+        minTrackingConfidence: 0.5,
+      });
+
+      faceMesh.onResults((results) => {
+        if (results.multiFaceLandmarks && results.multiFaceLandmarks.length > 0) {
+          setLandmarks(results.multiFaceLandmarks[0]);
+        } else {
+          setLandmarks(null);
+        }
+      });
+
+      faceMeshRef.current = faceMesh;
+
+      const sendVideoFrame = async () => {
+        if (video.readyState === 4 && faceMesh) {
+          try {
+            await faceMesh.send({ image: video });
+          } catch (e) {
+            console.warn("Failed to process frame with FaceMesh:", e);
+          }
+        }
+        requestID = requestAnimationFrame(sendVideoFrame);
+      };
+      sendVideoFrame();
+    } else {
+      console.warn("FaceMesh global not found. Please enable direct internet connection.");
+    }
 
     return () => {
-      cancelAnimationFrame(requestID);
-      faceMesh.close();
-      if (video.srcObject) {
-         video.srcObject.getTracks().forEach(t => t.stop());
+      if (requestID) cancelAnimationFrame(requestID);
+      if (faceMesh) {
+        try {
+          faceMesh.close();
+        } catch (e) {
+          console.warn("FaceMesh close error:", e);
+        }
+      }
+      if (activeStream) {
+         activeStream.getTracks().forEach(t => t.stop());
       }
     };
   }, []);
