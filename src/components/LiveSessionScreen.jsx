@@ -11,12 +11,6 @@ const LiveSessionScreen = ({ sessionData, onEnd, onIntentChange }) => {
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [rmsVolume, setRmsVolume] = useState(0);
   const [micActive, setMicActive] = useState(false);
-  const [hasInteracted, setHasInteracted] = useState(false);
-  const [isPreview, setIsPreview] = useState(false);
-
-  useEffect(() => {
-    setIsPreview(window.self !== window.top || window.location.hostname.includes('ai.studio'));
-  }, []);
 
   const recognitionRef = useRef(null);
   const synthesisRef = useRef(window.speechSynthesis);
@@ -28,34 +22,17 @@ const LiveSessionScreen = ({ sessionData, onEnd, onIntentChange }) => {
 
   const [errorMsg, setErrorMsg] = useState("");
 
-  const [voices, setVoices] = useState([]);
-
-  useEffect(() => {
-    const handleVoicesChanged = () => {
-      setVoices(window.speechSynthesis.getVoices());
-    };
-    window.speechSynthesis.onvoiceschanged = handleVoicesChanged;
-    handleVoicesChanged();
-    return () => {
-      window.speechSynthesis.onvoiceschanged = null;
-    };
-  }, []);
-
   const initSpeechRecognition = useCallback(() => {
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (SpeechRecognition) {
-      if (recognitionRef.current) {
-        try { recognitionRef.current.stop(); } catch(e) {}
-      }
+      if (recognitionRef.current) recognitionRef.current.stop();
       
-      const recognition = new SpeechRecognition();
-      // Optimization for Mobile: continuous can be buggy on some Android versions
-      // but we need it for live session feel.
-      recognition.continuous = true;
-      recognition.interimResults = true;
-      recognition.lang = 'en-US';
+      recognitionRef.current = new SpeechRecognition();
+      recognitionRef.current.continuous = true;
+      recognitionRef.current.interimResults = true;
+      recognitionRef.current.lang = 'en-US';
 
-      recognition.onresult = (event) => {
+      recognitionRef.current.onresult = (event) => {
         let interim = '';
         for (let i = event.resultIndex; i < event.results.length; ++i) {
           if (event.results[i].isFinal) {
@@ -69,48 +46,35 @@ const LiveSessionScreen = ({ sessionData, onEnd, onIntentChange }) => {
         if (interim) setTranscript(interim);
       };
 
-      recognition.onstart = () => {
+      recognitionRef.current.onstart = () => {
         setIsListening(true);
         setErrorMsg("");
       };
 
-      recognition.onend = () => {
-        // Robust re-initialization if mic is supposed to be active
+      recognitionRef.current.onend = () => {
         if (micActive) {
-            setTimeout(() => {
-                try { 
-                    if (micActive) recognition.start(); 
-                } catch(e) {
-                    console.warn("Speech recognition restart failed:", e);
-                }
-            }, 300);
+            try { recognitionRef.current.start(); } catch(e) {}
         } else {
             setIsListening(false);
         }
       };
 
-      recognition.onerror = (err) => {
+      recognitionRef.current.onerror = (err) => {
         console.error('Recognition Error:', err);
         if (err.error === 'not-allowed') {
-          setErrorMsg("Mic blocked. Use Chrome 'Site Settings' to allow.");
+          setErrorMsg("Mic permission blocked. Check browser settings.");
           setMicActive(false);
           setIsListening(false);
-        } else if (err.error === 'network') {
-          setErrorMsg("Link unstable. Retrying...");
         } else if (err.error === 'no-speech') {
-          // Normal behavior
-        } else if (err.error === 'aborted') {
-          // Usually means stop() was called or backgrounded
+            // Silence
         } else {
-          setErrorMsg("Neural link fault. Tap to reset.");
-          setMicActive(false);
+          setErrorMsg("Unstable neural link. Retrying...");
         }
       };
-      recognitionRef.current = recognition;
     } else {
-      setErrorMsg("Neural Vocal Analysis (Chrome) not detected.");
+      setErrorMsg("Neural Vocal Analysis not supported in this browser.");
     }
-  }, [micActive, sessionData]);
+  }, [micActive]);
 
   useEffect(() => {
     initSpeechRecognition();
@@ -147,16 +111,6 @@ const LiveSessionScreen = ({ sessionData, onEnd, onIntentChange }) => {
 
       const updateVolume = () => {
         if (!analyzerRef.current) return;
-        
-        // Check for muted track
-        const currentStream = audioStreamRef.current;
-        if (currentStream) {
-            const isMuted = currentStream.getAudioTracks().some(t => !t.enabled || t.muted);
-            if (isMuted && isListening) {
-               setErrorMsg("Microphone appears muted. Please unmute.");
-            }
-        }
-
         analyzerRef.current.getByteFrequencyData(dataArrayRef.current);
         let sum = 0;
         for (let i = 0; i < bufferLength; i++) sum += dataArrayRef.current[i];
@@ -211,93 +165,56 @@ const LiveSessionScreen = ({ sessionData, onEnd, onIntentChange }) => {
     if (!synthesisRef.current) return;
     synthesisRef.current.cancel();
     
-    // Fallback if Speech API is weird on mobile
-    if (text.length > 500) text = text.slice(0, 500);
-
     const utterance = new SpeechSynthesisUtterance(text);
+    const voices = synthesisRef.current.getVoices();
     const mode = sessionData?.voice || 'neutral';
 
-    let selectedVoice = null;
     if (mode === 'deep') {
-      selectedVoice = voices.find(v => v.name.toLowerCase().includes('male') && v.lang.startsWith('en')) || 
-                      voices.find(v => v.name.toLowerCase().includes('male')) || voices[0];
+      utterance.voice = voices.find(v => v.name.toLowerCase().includes('male')) || voices[0];
       utterance.pitch = 0.5;
-      utterance.rate = 0.85;
+      utterance.rate = 0.9;
     } else if (mode === 'soft') {
-      selectedVoice = voices.find(v => v.name.toLowerCase().includes('female') && v.lang.startsWith('en')) || 
-                      voices.find(v => v.name.toLowerCase().includes('female')) || voices[0];
-      utterance.pitch = 1.35;
-      utterance.rate = 1.05;
+      utterance.voice = voices.find(v => v.name.toLowerCase().includes('female')) || voices[0];
+      utterance.pitch = 1.3;
+      utterance.rate = 1.0;
     } else {
-      selectedVoice = voices.find(v => v.lang.startsWith('en')) || voices[0];
+      utterance.voice = voices[0];
       utterance.pitch = 1.0;
       utterance.rate = 1.0;
     }
 
-    if (selectedVoice) utterance.voice = selectedVoice;
-
     utterance.onstart = () => {
         setIsSpeaking(true);
-        // Ensure AudioContext is analyzing simulated AI voice
         if (audioContextRef.current?.state === 'suspended') audioContextRef.current.resume();
     };
     utterance.onend = () => {
         setIsSpeaking(false);
         setRmsVolume(0);
     };
-    utterance.onerror = (e) => {
-      console.error("Speech Synthesis Error:", e);
-      setIsSpeaking(false);
-    };
+    utterance.onerror = () => setIsSpeaking(false);
     
     synthesisRef.current.speak(utterance);
   };
 
   const toggleListening = () => {
-    // Explicit user interaction capture for Mobile Chrome
-    if (!hasInteracted) {
-      setHasInteracted(true);
-      // Unlock synthesis and audio context
-      if (synthesisRef.current) {
-        const silent = new SpeechSynthesisUtterance("");
-        synthesisRef.current.speak(silent);
-      }
-      if (audioContextRef.current?.state === 'suspended') {
-        audioContextRef.current.resume();
-      }
-    }
-
     if (isListening) {
-      if (recognitionRef.current) {
-        try { recognitionRef.current.stop(); } catch(e) {}
-      }
+      if (recognitionRef.current) recognitionRef.current.stop();
       setMicActive(false);
       setIsListening(false);
     } else {
       if (audioContextRef.current?.state === 'suspended') audioContextRef.current.resume();
       startAudioAnalysis();
-      
-      if (recognitionRef.current) {
-        try {
-          recognitionRef.current.start();
-          setMicActive(true);
-          setIsListening(true);
-          setErrorMsg("");
-        } catch (e) {
-          console.warn("Recognition start catch:", e);
-          initSpeechRecognition();
-          setTimeout(() => {
-            try { 
-              recognitionRef.current.start(); 
-              setMicActive(true);
-            } catch(err) {
-              setErrorMsg("Neural link failed. Refreshing...");
-            }
-          }, 300);
+      try {
+        if (recognitionRef.current) {
+            recognitionRef.current.start();
+            setMicActive(true);
+            setIsListening(true);
+            setErrorMsg("");
         }
-      } else {
+      } catch (e) {
         initSpeechRecognition();
-        setErrorMsg("Initializing neural stream...");
+        recognitionRef.current.start();
+        setMicActive(true);
       }
     }
   };
@@ -305,21 +222,14 @@ const LiveSessionScreen = ({ sessionData, onEnd, onIntentChange }) => {
   return (
     <div className="relative w-full h-full flex flex-col items-center justify-between py-10 px-6 overflow-hidden bg-[#050505]">
       {/* HUD Top-Bar */}
-      <div className="w-full flex flex-col md:flex-row justify-between items-center z-20 gap-4">
+      <div className="w-full flex justify-between items-center z-20">
         <div className="flex items-center gap-3">
             <motion.div 
                 animate={{ opacity: [1, 0.4, 1] }} 
                 transition={{ duration: 2, repeat: Infinity }}
                 className="w-2.5 h-2.5 bg-emerald-500 rounded-full shadow-[0_0_15px_#10b981]" 
             />
-            <div className="flex flex-col">
-              <span className="text-[10px] font-mono tracking-[0.3em] uppercase text-emerald-500">Live Neural Stream</span>
-              {isPreview && (
-                <span className="text-[8px] text-orange-400/80 font-mono italic">
-                  Preview Mode: Voice works best after deployment.
-                </span>
-              )}
-            </div>
+            <span className="text-[10px] font-mono tracking-[0.3em] uppercase text-emerald-500">Live Neural Stream</span>
         </div>
         <button 
           onClick={onEnd}
@@ -331,13 +241,12 @@ const LiveSessionScreen = ({ sessionData, onEnd, onIntentChange }) => {
 
       {/* Main Avatar Canvas Container */}
       <div className="relative flex-1 w-full max-h-[60vh] flex flex-col items-center justify-center">
-          <ThreeDNAvatar 
+         <ThreeDNAvatar 
             portrait={sessionData?.portrait} 
-            landmarks={sessionData?.landmarks}
             isSpeaking={isSpeaking} 
             rmsVolume={rmsVolume}
             isProcessing={isProcessing} 
-          />
+         />
       </div>
 
       {/* Bottom Interface HUD */}

@@ -107,14 +107,54 @@ const Particles = () => {
     );
 };
 
-export default function ThreeDNAvatar({ portrait, landmarks: initialLandmarks, isSpeaking, rmsVolume, isProcessing }) {
-  const [landmarks, setLandmarks] = useState(initialLandmarks);
+export default function ThreeDNAvatar({ portrait, isSpeaking, rmsVolume, isProcessing }) {
+  const videoRef = useRef();
+  const faceMeshRef = useRef();
+  const [landmarks, setLandmarks] = useState(null);
 
   useEffect(() => {
-    if (initialLandmarks) {
-      setLandmarks(initialLandmarks);
-    }
-  }, [initialLandmarks]);
+    const video = document.createElement('video');
+    video.autoplay = true;
+    video.muted = true;
+    video.playsInline = true;
+
+    navigator.mediaDevices.getUserMedia({ video: true }).then((stream) => {
+      video.srcObject = stream;
+      video.play();
+    }).catch(err => console.warn("Avatar camera access failed:", err));
+
+    const faceMesh = new FaceMesh({
+      locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}`,
+    });
+
+    faceMesh.setOptions({
+      maxNumFaces: 1,
+      refineLandmarks: true,
+      minDetectionConfidence: 0.5,
+      minTrackingConfidence: 0.5,
+    });
+
+    faceMesh.onResults((results) => {
+      if (results.multiFaceLandmarks && results.multiFaceLandmarks.length > 0) {
+        setLandmarks(results.multiFaceLandmarks[0]);
+      }
+    });
+
+    let requestID;
+    const sendVideoFrame = async () => {
+      if (video.readyState === 4) {
+        await faceMesh.send({ image: video });
+      }
+      requestID = requestAnimationFrame(sendVideoFrame);
+    };
+    sendVideoFrame();
+
+    return () => {
+      cancelAnimationFrame(requestID);
+      faceMesh.close();
+      if (video.srcObject) video.srcObject.getTracks().forEach(t => t.stop());
+    };
+  }, []);
 
   return (
     <div className="w-full h-full relative cursor-none">
